@@ -3,64 +3,115 @@
 pragma solidity ^0.8.0;
 
 
-import '../interface/IERC20.sol';
-import '../interface/IERC1155.sol';
-import '../interface/IConditionalTokens.sol';
 
-contract ScoutX {
+import './IERC20.sol';
+import './IERC1155.sol';
+import './IConditionalTokens.sol';
+import {FixedProductMarketMaker} from "./FPMM.sol";
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+
+
+
+contract ScoutX is Ownable, ReentrancyGuard{
     IERC20 USDC;
     IConditionalTokens conditionalTokens;
     address public oracle;
     address admin;
-    mapping(bytes32 => mapping(uint => uint)) public TokenBalance;
+    mapping(bytes32 => address) public playerIdPlayer;
+
+    uint storage fee;
+    string storage name;
+    string storage symbol;
+    uint storage PlayerCount;
 
 
+    event PlayerCreated(
+        string memory name, string memory symbol,
+        address _conditionalTokensAddr,
+        address _collateralTokenAddr,
+        bytes32 _conditionId,
+        uint _fee,
+        address playerAddress
+
+    );
     constructor(
         address _usdc,
         address _conditionalTokens,
-        address _oracle
+        address _oracle,
+        uint _fee
     ) public {
+
 
         USDC = IERC20(_usdc);
         conditionalTokens = IConditionalTokens(_conditionalTokens);
+        conditionaladdress = _conditionalTokens;
         oracle = _oracle;
         admin = msg.sender;
+        fee = _fee;
+        PlayerCount = 0;
+
     }
 
     modifier OnlyAdmin() {
-        require(msg.sender == admin, 'only admin');
+        require(msg.sender == admin, "only admin");
         _;
     }
 
-
-    function createBet(bytes32 questionId, uint amount) external {
-        conditionalTokens.prepareCondition(oracle,questionId,2);
-
-        bytes32 conditionId = conditionalTokens.getConditionId(oracle,questionId,2);
-
-        uint[] memory partition = new uint[](2);
-        partition[0] = 1;
-        partition[1] = 2;
-
-
-
-        USDC.approve(address(conditionalTokens) , amount);
-
-        conditionalTokens.splitPosition(USDC,bytes32(0),conditionId,partition,amount);
-
-        TokenBalance[questionId][0] = amount;
-        TokenBalance[questionId][1] = amount;
-
+    function setfee(_fee) public OnlyAdmin{
+        fee = _fee;
     }
 
-    function transferTokens(bytes32 questionId,uint indexSet,address to, uint amount) external OnlyAdmin{
-        require(TokenBalance[questionId][indexSet] >= amount , 'not enough tokens' );
-        bytes32 conditionId = conditionalTokens.getConditionId(oracle,questionId,2);
-        bytes32 collectionId = conditionalTokens.getCollectionId(bytes32(0),conditionId,indexSet);
-        uint positionId = conditionalTokens.getPositionId(USDC, collectionId);
 
-        conditionalTokens.safeTransferFrom(address(this),to,positionId,amount,"");
+    // createPlayer function to deploy a new interation of FPMM for a player with playername and playersymbol and playerId
+
+
+    function createPlayer(string playername,
+        string playersymbol,bytes32 playerId, uint amount) external payable {
+        
+        conditionalTokens.prepareCondition(oracle,playerId,2);
+        
+       
+
+
+        bytes32 conditionId = conditionalTokens.getConditionId(oracle,playerId,2);
+      
+       
+        FixedProductMarketMaker newPlayer = new FixedProductMarketMaker(playername,playersymbol,
+        conditionaladdress,
+        _usdc,conditionId,
+        fee);
+
+        playerIdPlayer[playerId] = address(newPlayer);
+
+        emit PlayerCreated(playername,playersymbol,
+        conditionaladdress,
+        _usdc,conditionId,
+        fee,address(newPlayer)
+        );
+
+        PlayerCount = SafeMath.add(PlayerCount, 1);
+       
+
+
+        
     }
+
+
+    /**
+     * Get playerAddress by `playerId`
+     */
+    function getPlayerByplayerId(uint256 _playerId)
+        public
+        view
+        returns (address)
+    {
+        return playerIdPlayer[_playerId];
+    }
+
+
 
 
     function onERC1155Received(
@@ -86,4 +137,3 @@ contract ScoutX {
         return bytes4(keccak256("onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)"));
     }
 }
-
